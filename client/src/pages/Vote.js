@@ -55,7 +55,7 @@ export default function Vote() {
       try {
         const apiUrl =
           process.env.NODE_ENV === "production"
-            ? "https://your-production-url.com/api/vote"
+            ? "duck-and-vote-z37v.vercel.app"
             : "http://localhost:5000/api/vote";
 
         await fetch(apiUrl, {
