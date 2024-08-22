@@ -14,7 +14,7 @@ export default function JoinSession() {
     }
   };
 
-  const shareableLink = `http://localhost:3000/vote/${sessionId}`;
+  const shareableLink = `https://duck-and-vote.vercel.app/vote/${sessionId}`;
 
   const copyToClipboard = async () => {
     try {
