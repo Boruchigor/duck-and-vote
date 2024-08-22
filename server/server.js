@@ -1,4 +1,3 @@
-// server/server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,13 +9,22 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000", // Adjust for production deployment
+    origin: process.env.NODE_ENV === "production"
+      ? "https://duck-and-vote.vercel.app" // Use your Vercel frontend URL here
+      : "http://localhost:3000",
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === "production"
+    ? "https://duck-and-vote.vercel.app" // Use your Vercel frontend URL here
+    : "http://localhost:3000",
+  methods: ["GET", "POST"],
+  credentials: true,
+}));
+
 app.use(express.json());
 
 // MongoDB connection
