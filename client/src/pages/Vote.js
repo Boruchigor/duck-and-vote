@@ -55,7 +55,7 @@ export default function Vote() {
       try {
         const apiUrl =
           process.env.NODE_ENV === "production"
-            ? "https://duck-and-vote.onrender.com"
+            ? "https://duck-and-vote.onrender.com/api/vote"
             : "http://localhost:5000/api/vote";
 
         await fetch(apiUrl, {
