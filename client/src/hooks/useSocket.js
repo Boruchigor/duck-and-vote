@@ -8,7 +8,7 @@ const useSocket = (sessionId) => {
   useEffect(() => {
     const socketUrl =
       process.env.NODE_ENV === "production"
-        ? "duck-and-vote-z37v.vercel.app"
+        ? "wss://duck-and-vote-z37v.vercel.app"
         : "http://localhost:5000";
 
     const newSocket = io(socketUrl, { transports: ['websocket'] }); // Force WebSocket transport
