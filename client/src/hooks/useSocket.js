@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import io from "socket.io-client";
 
-const useSocket = (sessionId) => {
-  const [socket, setSocket] = useState(null); // State to manage socket instance
+const useSocket = () => {
+  const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -11,15 +11,13 @@ const useSocket = (sessionId) => {
         ? "https://duck-and-vote.onrender.com"
         : "http://localhost:5000";
 
-    const newSocket = io(socketUrl, { transports: ['websocket'] }); // Force WebSocket transport
+    const newSocket = io(socketUrl, { transports: ['websocket'] });
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
       console.log("Socket connected");
       setConnected(true);
-      if (sessionId) {
-        newSocket.emit("join", { sessionId });
-      }
+      // **Removed the 'join' event emission here**
     });
 
     newSocket.on("disconnect", () => {
@@ -27,11 +25,10 @@ const useSocket = (sessionId) => {
       setConnected(false);
     });
 
-    // Cleanup on unmount
     return () => {
       newSocket.disconnect();
     };
-  }, [sessionId]);
+  }, []); // **Removed 'sessionId' from dependencies to prevent socket recreation**
 
   return socket;
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import useSocket from "../hooks/useSocket";
 
@@ -10,15 +10,29 @@ export default function Vote() {
   const [members, setMembers] = useState({});
   const [votingFinished, setVotingFinished] = useState(false);
   const [averageVote, setAverageVote] = useState(null);
-  const socket = useSocket(sessionId);
+  const socket = useSocket(); // Updated to remove sessionId
 
+  // Ref to prevent multiple joins
+  const hasJoinedRef = useRef(false);
+
+  // Emit join event only once
   useEffect(() => {
-    if (socket && nickname && sessionId) {
+    if (socket && nickname && sessionId && !hasJoinedRef.current) {
+      console.log("Emitting join event with nickname:", nickname);
+      socket.emit("join", { sessionId, nickname });
+      hasJoinedRef.current = true;
+    }
+  }, [socket, nickname, sessionId]);
+
+  // Set up socket event handlers
+  useEffect(() => {
+    if (socket) {
       const handleVoteUpdate = (updatedMembers) => {
         setMembers(updatedMembers);
       };
 
       const handleMemberUpdate = (updatedMembers) => {
+        console.log("Received memberUpdate:", updatedMembers);
         setMembers(updatedMembers);
       };
 
@@ -39,8 +53,7 @@ export default function Vote() {
       socket.on("navigateToResults", handleNavigateToResults);
       socket.on("resetVotes", handleResetVotes);
 
-      socket.emit("join", { sessionId, nickname });
-
+      // Clean up on unmount
       return () => {
         socket.off("voteUpdate", handleVoteUpdate);
         socket.off("memberUpdate", handleMemberUpdate);
@@ -48,10 +61,10 @@ export default function Vote() {
         socket.off("resetVotes", handleResetVotes);
       };
     }
-  }, [socket, nickname, sessionId]);
+  }, [socket]);
 
-  const submitVote = async () => {
-    if (myVote != null) {
+  const submitVote = async (vote) => {
+    if (vote != null) {
       try {
         const apiUrl =
           process.env.NODE_ENV === "production"
@@ -67,7 +80,7 @@ export default function Vote() {
             sessionId,
             memberId: socket.id,
             nickname,
-            vote: myVote,
+            vote,
           }),
         });
 
@@ -75,10 +88,10 @@ export default function Vote() {
           sessionId,
           memberId: socket.id,
           nickname,
-          vote: myVote,
+          vote,
         });
 
-        setMyVote(null);
+        setMyVote(vote);
       } catch (error) {
         console.error("Error submitting vote: ", error);
       }
@@ -95,6 +108,11 @@ export default function Vote() {
     }
   };
 
+  const totalMembers = Object.keys(members).length;
+const membersVoted = Object.values(members).filter(
+  (member) => member.status === "Done"
+).length;
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-2xl bg-white p-8 rounded-lg shadow-lg">
@@ -110,23 +128,22 @@ export default function Vote() {
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((number) => (
               <button
                 key={number}
-                onClick={() => setMyVote(number)}
+                onClick={() => submitVote(number)}
+                disabled={myVote !== null}
                 className={`w-full py-3 px-4 rounded-full text-white font-semibold focus:outline-none transition-colors duration-200 ${
                   myVote === number
                     ? "bg-blue-600"
                     : "bg-blue-400 hover:bg-blue-500"
+                } ${
+                  myVote !== null && myVote !== number
+                    ? "opacity-50 cursor-not-allowed"
+                    : ""
                 }`}
               >
                 {number}
               </button>
             ))}
           </div>
-          <button
-            onClick={submitVote}
-            className="w-full mt-4 bg-blue-500 text-white py-3 px-4 rounded-md hover:bg-blue-600 transition-colors duration-200"
-          >
-            Submit Vote
-          </button>
         </div>
 
         <div className="mb-6">
@@ -137,7 +154,10 @@ export default function Vote() {
                 key={memberId}
                 className="bg-gray-200 p-4 rounded-md text-gray-700"
               >
-                <span className="font-semibold">{members[memberId].nickname}:</span>{" "}
+                <span className="font-semibold">
+                  {members[memberId].nickname || "Unknown"}
+                </span>
+                {": "}
                 {members[memberId].status}
                 {votingFinished &&
                   members[memberId].vote != null &&
@@ -146,6 +166,10 @@ export default function Vote() {
             ))}
           </ul>
         </div>
+
+        <p>
+  {membersVoted} out of {totalMembers} members have voted.
+</p>
 
         {averageVote !== null && (
           <div className="mb-6">

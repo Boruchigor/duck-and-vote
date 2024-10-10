@@ -63,6 +63,26 @@ io.on("connection", (socket) => {
         vote: data.vote,
       };
       io.to(data.sessionId).emit("voteUpdate", sessions[data.sessionId]);
+
+      // Check if all members have voted
+      const allVoted = Object.values(sessions[data.sessionId]).every(
+        (member) => member.status === "Done"
+      );
+
+      if (allVoted) {
+        // Calculate the average vote
+        const votes = Object.values(sessions[data.sessionId])
+          .map((member) => member.vote)
+          .filter((vote) => vote != null);
+        const total = votes.reduce((acc, curr) => acc + curr, 0);
+        const averageVote = votes.length > 0 ? total / votes.length : 0;
+
+        // Emit 'navigateToResults' to all clients in the session
+        io.to(data.sessionId).emit("navigateToResults", {
+          sessionId: data.sessionId,
+          averageVote,
+        });
+      }
     }
   });
 
@@ -98,6 +118,26 @@ io.on("connection", (socket) => {
       if (sessions[sessionId][socket.id]) {
         delete sessions[sessionId][socket.id];
         io.to(sessionId).emit("memberUpdate", sessions[sessionId]);
+
+        // Check if all remaining members have voted
+        const allVoted = Object.values(sessions[sessionId]).every(
+          (member) => member.status === "Done"
+        );
+
+        if (allVoted && Object.keys(sessions[sessionId]).length > 0) {
+          // Calculate the average vote
+          const votes = Object.values(sessions[sessionId])
+            .map((member) => member.vote)
+            .filter((vote) => vote != null);
+          const total = votes.reduce((acc, curr) => acc + curr, 0);
+          const averageVote = votes.length > 0 ? total / votes.length : 0;
+
+          // Emit 'navigateToResults' to all clients in the session
+          io.to(sessionId).emit("navigateToResults", {
+            sessionId,
+            averageVote,
+          });
+        }
       }
     }
   });
