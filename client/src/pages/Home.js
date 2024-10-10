@@ -1,23 +1,23 @@
-import React, { useState } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function Home() {
   const navigate = useNavigate();
-  const [sessionId, setSessionId] = useState(null);
 
   const createVotingSession = () => {
     const newSessionId = Math.random().toString(36).substr(2, 9);
-    setSessionId(newSessionId);
     navigate(`/vote/${newSessionId}`);
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-lg">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6">Welcome to the Voting App</h1>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-600 to-purple-600">
+      <div className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg p-8 rounded-xl shadow-2xl max-w-md mx-4">
+        <h1 className="text-4xl sm:text-5xl font-bold text-white mb-8 text-center">
+          Welcome to Duck and Vote
+        </h1>
         <button
           onClick={createVotingSession}
-          className="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition duration-200"
+          className="bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white px-10 py-4 rounded-full text-xl font-semibold shadow-lg transform transition-transform duration-300 hover:scale-105 focus:outline-none"
         >
           Create Voting Session
         </button>

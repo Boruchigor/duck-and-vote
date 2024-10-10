@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import useSocket from "../hooks/useSocket";
+import { UserGroupIcon } from "@heroicons/react/solid";
 
 export default function Vote() {
   const { sessionId } = useParams();
@@ -10,7 +11,7 @@ export default function Vote() {
   const [members, setMembers] = useState({});
   const [votingFinished, setVotingFinished] = useState(false);
   const [averageVote, setAverageVote] = useState(null);
-  const socket = useSocket(); // Updated to remove sessionId
+  const socket = useSocket();
 
   // Ref to prevent multiple joins
   const hasJoinedRef = useRef(false);
@@ -109,31 +110,35 @@ export default function Vote() {
   };
 
   const totalMembers = Object.keys(members).length;
-const membersVoted = Object.values(members).filter(
-  (member) => member.status === "Done"
-).length;
+  const membersVoted = Object.values(members).filter(
+    (member) => member.status === "Done"
+  ).length;
+
+  // Calculate voting progress percentage
+  const votingProgress = totalMembers > 0 ? (membersVoted / totalMembers) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-2xl bg-white p-8 rounded-lg shadow-lg">
-        <h1 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-3xl bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg p-8 rounded-xl shadow-2xl">
+        <h1 className="text-3xl font-bold text-white mb-8 text-center flex items-center justify-center">
+          <UserGroupIcon className="w-8 h-8 mr-2" />
           Voting Session: {sessionId}
         </h1>
 
-        <div className="mb-6">
-          <label className="block text-gray-700 mb-2 font-medium">
+        <div className="mb-8">
+          <label className="block text-white mb-4 text-xl font-medium text-center">
             Your Vote:
           </label>
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-5 sm:grid-cols-10 gap-4 mb-6">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((number) => (
               <button
                 key={number}
                 onClick={() => submitVote(number)}
                 disabled={myVote !== null}
-                className={`w-full py-3 px-4 rounded-full text-white font-semibold focus:outline-none transition-colors duration-200 ${
+                className={`w-full py-4 rounded-full text-white font-semibold focus:outline-none transition-all duration-200 transform ${
                   myVote === number
-                    ? "bg-blue-600"
-                    : "bg-blue-400 hover:bg-blue-500"
+                    ? "bg-gradient-to-br from-green-400 to-blue-500 shadow-lg scale-105"
+                    : "bg-white bg-opacity-20 hover:bg-opacity-30"
                 } ${
                   myVote !== null && myVote !== number
                     ? "opacity-50 cursor-not-allowed"
@@ -144,51 +149,62 @@ const membersVoted = Object.values(members).filter(
               </button>
             ))}
           </div>
-        </div>
 
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Members</h2>
-          <ul className="space-y-2">
-            {Object.keys(members).map((memberId) => (
-              <li
-                key={memberId}
-                className="bg-gray-200 p-4 rounded-md text-gray-700"
-              >
-                <span className="font-semibold">
-                  {members[memberId].nickname || "Unknown"}
-                </span>
-                {": "}
-                {members[memberId].status}
-                {votingFinished &&
-                  members[memberId].vote != null &&
-                  ` (Voted: ${members[memberId].vote})`}
-              </li>
-            ))}
-          </ul>
-        </div>
+          <p className="text-white text-center mb-4">
+            {membersVoted} out of {totalMembers} members have voted.
+          </p>
 
-        <p>
-  {membersVoted} out of {totalMembers} members have voted.
-</p>
+          {/* Progress Bar */}
+          <div className="w-full bg-white bg-opacity-20 rounded-full h-4">
+            <div
+              className="bg-gradient-to-r from-green-400 to-blue-500 h-4 rounded-full transition-all duration-500"
+              style={{ width: `${votingProgress}%` }}
+            ></div>
+          </div>
+        </div>
 
         {averageVote !== null && (
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-2">
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-white mb-4 text-center">
               Average Vote: {averageVote.toFixed(2)}
             </h2>
           </div>
         )}
 
-        <div className="flex justify-between">
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold text-white mb-4 text-center">
+            Members
+          </h2>
+          <ul className="space-y-2 max-h-64 overflow-y-auto">
+            {Object.keys(members).map((memberId) => (
+              <li
+                key={memberId}
+                className="bg-white bg-opacity-20 p-4 rounded-md text-white flex items-center justify-between"
+              >
+                <span className="font-semibold">
+                  {members[memberId].nickname || "Unknown"}
+                </span>
+                <span>
+                  {members[memberId].status}
+                  {votingFinished &&
+                    members[memberId].vote != null &&
+                    ` (Voted: ${members[memberId].vote})`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="flex justify-center space-x-4">
           <button
             onClick={finishVoting}
-            className="bg-green-500 text-white py-2 px-4 rounded-md hover:bg-green-600 transition-colors duration-200"
+            className="bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white py-3 px-6 rounded-full font-semibold shadow-lg transform transition-transform duration-300 hover:scale-105 focus:outline-none"
           >
             Finish Voting
           </button>
           <button
             onClick={resetVotes}
-            className="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition-colors duration-200"
+            className="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white py-3 px-6 rounded-full font-semibold shadow-lg transform transition-transform duration-300 hover:scale-105 focus:outline-none"
           >
             Reset Votes
           </button>
