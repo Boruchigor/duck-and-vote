@@ -11,7 +11,7 @@ const useSocket = () => {
         ? "https://duck-and-vote.onrender.com"
         : "http://localhost:5000");
 
-    const newSocket = io(socketUrl, { transports: ['websocket'] });
+    const newSocket = io(socketUrl, { transports: ['websocket', 'polling'] })
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
