@@ -3,7 +3,6 @@ import io from "socket.io-client";
 
 const useSocket = () => {
   const [socket, setSocket] = useState(null);
-  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const socketUrl =
@@ -16,19 +15,16 @@ const useSocket = () => {
 
     newSocket.on("connect", () => {
       console.log("Socket connected");
-      setConnected(true);
-      // **Removed the 'join' event emission here**
     });
 
     newSocket.on("disconnect", () => {
       console.log("Socket disconnected");
-      setConnected(false);
     });
 
     return () => {
       newSocket.disconnect();
     };
-  }, []); // **Removed 'sessionId' from dependencies to prevent socket recreation**
+  }, []);
 
   return socket;
 };

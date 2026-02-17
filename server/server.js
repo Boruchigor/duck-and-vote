@@ -37,45 +37,99 @@ mongoose.connect(process.env.MONGODB_URI, {
 // In-memory session store (to replace sessions logic)
 const sessions = {};
 
+const getSession = (sessionId) => sessions[sessionId];
+
+const createSessionIfMissing = (sessionId) => {
+  if (!sessions[sessionId]) {
+    sessions[sessionId] = {
+      members: {},
+      adminSocketId: null,
+      creatorKey: null,
+      tasks: [],
+      activeTaskId: null,
+    };
+  }
+  return sessions[sessionId];
+};
+
+const getVotesAverage = (session) => {
+  const votes = Object.values(session.members)
+    .map((member) => member.vote)
+    .filter((vote) => vote != null);
+  const total = votes.reduce((acc, curr) => acc + curr, 0);
+  return votes.length > 0 ? total / votes.length : 0;
+};
+
+const allMembersVoted = (session) =>
+  Object.values(session.members).length > 0 &&
+  Object.values(session.members).every((member) => member.status === "Done");
+
+const emitSessionState = (sessionId) => {
+  const session = getSession(sessionId);
+  if (!session) {
+    return;
+  }
+
+  io.to(sessionId).emit("sessionState", {
+    members: session.members,
+    adminSocketId: session.adminSocketId,
+    tasks: session.tasks,
+    activeTaskId: session.activeTaskId,
+  });
+};
+
+const ensureAdmin = (session, socket, eventName) => {
+  if (!session || session.adminSocketId !== socket.id) {
+    console.log(`Blocked non-admin action "${eventName}" from ${socket.id}`);
+    socket.emit("sessionError", {
+      code: "NOT_ADMIN",
+      message: "Only admin can perform this action.",
+    });
+    return false;
+  }
+  return true;
+};
+
 // Socket.IO logic (based on your existing code)
 io.on("connection", (socket) => {
   console.log("New client connected");
 
-  socket.on("join", ({ sessionId, nickname }) => {
+  socket.on("join", ({ sessionId, nickname, creatorKey }) => {
     console.log(
       `Client ${socket.id} joined session ${sessionId} as ${nickname}`
     );
-    if (!sessions[sessionId]) {
-      sessions[sessionId] = {};
+    const session = createSessionIfMissing(sessionId);
+
+    if (!session.creatorKey && creatorKey) {
+      session.creatorKey = creatorKey;
     }
-    sessions[sessionId][socket.id] = { nickname, status: "Joined" };
+
+    if (!session.adminSocketId) {
+      session.adminSocketId = socket.id;
+    } else if (session.creatorKey && creatorKey && session.creatorKey === creatorKey) {
+      session.adminSocketId = socket.id;
+    }
+
+    session.members[socket.id] = { nickname, status: "Joined" };
     socket.join(sessionId);
 
-    io.to(sessionId).emit("memberUpdate", sessions[sessionId]);
+    emitSessionState(sessionId);
   });
 
   socket.on("vote", (data) => {
     console.log(`Client ${data.memberId} voted in session ${data.sessionId}`);
-    if (sessions[data.sessionId] && sessions[data.sessionId][data.memberId]) {
-      sessions[data.sessionId][data.memberId] = {
+    const session = getSession(data.sessionId);
+    if (session && session.members[data.memberId]) {
+      session.members[data.memberId] = {
         nickname: data.nickname,
         status: "Done",
         vote: data.vote,
       };
-      io.to(data.sessionId).emit("voteUpdate", sessions[data.sessionId]);
+      emitSessionState(data.sessionId);
 
       // Check if all members have voted
-      const allVoted = Object.values(sessions[data.sessionId]).every(
-        (member) => member.status === "Done"
-      );
-
-      if (allVoted) {
-        // Calculate the average vote
-        const votes = Object.values(sessions[data.sessionId])
-          .map((member) => member.vote)
-          .filter((vote) => vote != null);
-        const total = votes.reduce((acc, curr) => acc + curr, 0);
-        const averageVote = votes.length > 0 ? total / votes.length : 0;
+      if (allMembersVoted(session)) {
+        const averageVote = getVotesAverage(session);
 
         // Emit 'navigateToResults' to all clients in the session
         io.to(data.sessionId).emit("navigateToResults", {
@@ -86,57 +140,120 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("finishVoting", (sessionId) => {
+  socket.on("finishVoting", ({ sessionId }) => {
     console.log(`Finishing voting for session ${sessionId}`);
-    const members = sessions[sessionId];
-    const votes = Object.values(members)
-      .map((member) => member.vote)
-      .filter((vote) => vote != null);
-    const total = votes.reduce((acc, curr) => acc + curr, 0);
-    const averageVote = votes.length > 0 ? total / votes.length : 0;
+    const session = getSession(sessionId);
+    if (!ensureAdmin(session, socket, "finishVoting")) {
+      return;
+    }
+
+    const averageVote = getVotesAverage(session);
     io.to(sessionId).emit("navigateToResults", { sessionId, averageVote });
   });
 
   socket.on("resetVotes", ({ sessionId }) => {
     console.log(`Reset votes for session ${sessionId}`);
-    if (sessions[sessionId]) {
-      Object.keys(sessions[sessionId]).forEach((memberId) => {
-        sessions[sessionId][memberId].status = "Joined";
-        delete sessions[sessionId][memberId].vote;
+    const session = getSession(sessionId);
+    if (!ensureAdmin(session, socket, "resetVotes")) {
+      return;
+    }
+
+    if (session) {
+      Object.keys(session.members).forEach((memberId) => {
+        session.members[memberId].status = "Joined";
+        delete session.members[memberId].vote;
       });
       console.log(`Emitting resetVotes for session ${sessionId}`);
       io.to(sessionId).emit("resetVotes", {
         sessionId,
-        members: sessions[sessionId],
+        members: session.members,
       });
+      emitSessionState(sessionId);
     }
+  });
+
+  socket.on("addTask", ({ sessionId, title }) => {
+    const session = getSession(sessionId);
+    if (!ensureAdmin(session, socket, "addTask")) {
+      return;
+    }
+    const trimmed = (title || "").trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const task = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: trimmed,
+    };
+
+    session.tasks.unshift(task);
+    if (!session.activeTaskId) {
+      session.activeTaskId = task.id;
+    }
+    emitSessionState(sessionId);
+  });
+
+  socket.on("replaceTasks", ({ sessionId, tasks }) => {
+    const session = getSession(sessionId);
+    if (!ensureAdmin(session, socket, "replaceTasks")) {
+      return;
+    }
+    if (!Array.isArray(tasks)) {
+      return;
+    }
+
+    session.tasks = tasks
+      .filter((task) => task && typeof task.title === "string")
+      .map((task, index) => ({
+        id: task.id || `import-${Date.now()}-${index}`,
+        title: task.title.trim(),
+      }))
+      .filter((task) => task.title);
+
+    session.activeTaskId = session.tasks[0]?.id || null;
+    emitSessionState(sessionId);
+  });
+
+  socket.on("selectTask", ({ sessionId, taskId }) => {
+    const session = getSession(sessionId);
+    if (!ensureAdmin(session, socket, "selectTask")) {
+      return;
+    }
+
+    const hasTask = session.tasks.some((task) => task.id === taskId);
+    if (!hasTask) {
+      return;
+    }
+    session.activeTaskId = taskId;
+    emitSessionState(sessionId);
   });
 
   socket.on("disconnect", () => {
     console.log("Client disconnected");
     for (const sessionId in sessions) {
-      if (sessions[sessionId][socket.id]) {
-        delete sessions[sessionId][socket.id];
-        io.to(sessionId).emit("memberUpdate", sessions[sessionId]);
+      const session = sessions[sessionId];
+      if (session.members[socket.id]) {
+        delete session.members[socket.id];
+
+        if (session.adminSocketId === socket.id) {
+          session.adminSocketId = Object.keys(session.members)[0] || null;
+        }
+        emitSessionState(sessionId);
 
         // Check if all remaining members have voted
-        const allVoted = Object.values(sessions[sessionId]).every(
-          (member) => member.status === "Done"
-        );
-
-        if (allVoted && Object.keys(sessions[sessionId]).length > 0) {
-          // Calculate the average vote
-          const votes = Object.values(sessions[sessionId])
-            .map((member) => member.vote)
-            .filter((vote) => vote != null);
-          const total = votes.reduce((acc, curr) => acc + curr, 0);
-          const averageVote = votes.length > 0 ? total / votes.length : 0;
+        if (allMembersVoted(session)) {
+          const averageVote = getVotesAverage(session);
 
           // Emit 'navigateToResults' to all clients in the session
           io.to(sessionId).emit("navigateToResults", {
             sessionId,
             averageVote,
           });
+        }
+
+        if (Object.keys(session.members).length === 0) {
+          delete sessions[sessionId];
         }
       }
     }
@@ -147,9 +264,11 @@ io.on("connection", (socket) => {
 const voteRoutes = require('./api/voteRoutes');
 const resetRoutes = require('./api/resetRoutes');
 const resultsRoutes = require('./api/resultsRoutes');
+const linearRoutes = require('./api/linearRoutes');
 app.use('/api', voteRoutes);
 app.use('/api', resetRoutes);
 app.use('/api', resultsRoutes);
+app.use('/api', linearRoutes);
 
 // Start the server
 const PORT = process.env.PORT || 5000;
