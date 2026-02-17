@@ -6,9 +6,10 @@ const useSocket = () => {
 
   useEffect(() => {
     const socketUrl =
-      process.env.NODE_ENV === "production"
+      process.env.REACT_APP_SOCKET_URL ||
+      (process.env.NODE_ENV === "production"
         ? "https://duck-and-vote.onrender.com"
-        : "http://localhost:5000";
+        : "http://localhost:5000");
 
     const newSocket = io(socketUrl, { transports: ['websocket'] });
     setSocket(newSocket);

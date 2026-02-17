@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import useSocket from "../hooks/useSocket";
 import { UserGroupIcon } from "@heroicons/react/solid";
@@ -8,103 +8,103 @@ export default function Vote() {
   const [searchParams] = useSearchParams();
   const nickname = searchParams.get("nickname");
   const creatorKey = searchParams.get("creatorKey");
-  const [myVote, setMyVote] = useState(null);
+
   const [members, setMembers] = useState({});
   const [adminSocketId, setAdminSocketId] = useState(null);
-  const [votingFinished, setVotingFinished] = useState(false);
-  const [averageVote, setAverageVote] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [importTasks, setImportTasks] = useState([]);
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [taskInput, setTaskInput] = useState("");
   const [linearSearch, setLinearSearch] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const socket = useSocket();
-  const apiBase =
-    process.env.NODE_ENV === "production"
-      ? "https://duck-and-vote.onrender.com"
-      : "http://localhost:5000";
 
-  // Ref to prevent multiple joins
+  const apiBase =
+    process.env.REACT_APP_API_BASE_URL ||
+    (process.env.NODE_ENV === "production"
+      ? "https://duck-and-vote.onrender.com"
+      : "http://localhost:5000");
+
   const hasJoinedRef = useRef(false);
 
-  // Emit join event only once
   useEffect(() => {
     if (socket && nickname && sessionId && !hasJoinedRef.current) {
-      console.log("Emitting join event with nickname:", nickname);
       socket.emit("join", { sessionId, nickname, creatorKey });
       hasJoinedRef.current = true;
     }
   }, [socket, nickname, sessionId, creatorKey]);
 
-  // Set up socket event handlers
   useEffect(() => {
-    if (socket) {
-      const handleSessionState = (sessionState) => {
-        setMembers(sessionState.members || {});
-        setAdminSocketId(sessionState.adminSocketId || null);
-        setTasks(sessionState.tasks || []);
-        setActiveTaskId(sessionState.activeTaskId || null);
-      };
-
-      const handleNavigateToResults = ({ averageVote }) => {
-        setAverageVote(averageVote);
-        setVotingFinished(true);
-      };
-
-      const handleResetVotes = ({ members }) => {
-        setMembers(members);
-        setMyVote(null);
-        setAverageVote(null);
-        setVotingFinished(false);
-      };
-
-      const handleSessionError = ({ message }) => {
-        setErrorMessage(message || "Action not allowed.");
-      };
-
-      socket.on("sessionState", handleSessionState);
-      socket.on("navigateToResults", handleNavigateToResults);
-      socket.on("resetVotes", handleResetVotes);
-      socket.on("sessionError", handleSessionError);
-
-      // Clean up on unmount
-      return () => {
-        socket.off("sessionState", handleSessionState);
-        socket.off("navigateToResults", handleNavigateToResults);
-        socket.off("resetVotes", handleResetVotes);
-        socket.off("sessionError", handleSessionError);
-      };
+    if (!socket) {
+      return undefined;
     }
+
+    const handleSessionState = (sessionState) => {
+      setMembers(sessionState.members || {});
+      setAdminSocketId(sessionState.adminSocketId || null);
+      setTasks(sessionState.tasks || []);
+      setImportTasks(sessionState.importTasks || []);
+      setActiveTaskId(sessionState.activeTaskId || null);
+    };
+
+    const handleSessionError = ({ message }) => {
+      setErrorMessage(message || "Action not allowed.");
+    };
+
+    socket.on("sessionState", handleSessionState);
+    socket.on("sessionError", handleSessionError);
+
+    return () => {
+      socket.off("sessionState", handleSessionState);
+      socket.off("sessionError", handleSessionError);
+    };
   }, [socket]);
 
-  const submitVote = async (vote) => {
-    if (vote != null) {
-      try {
-        await fetch(`${apiBase}/api/vote`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            sessionId,
-            memberId: socket.id,
-            nickname,
-            vote,
-          }),
-        });
+  const activeTask = useMemo(
+    () => tasks.find((task) => task.id === activeTaskId) || null,
+    [tasks, activeTaskId]
+  );
+  const myVote = activeTask?.votesByMember?.[socket?.id] ?? null;
+  const votingFinished = activeTask?.status === "voted";
+  const averageVote =
+    typeof activeTask?.averageVote === "number" ? activeTask.averageVote : null;
+  const isAdmin = Boolean(socket?.id && adminSocketId === socket.id);
 
-        socket.emit("vote", {
+  const totalMembers = Object.keys(members).length;
+  const membersVoted = Object.values(members).filter(
+    (member) => member.status === "Done"
+  ).length;
+  const votingProgress =
+    totalMembers > 0 ? (membersVoted / totalMembers) * 100 : 0;
+
+  const submitVote = async (vote) => {
+    if (vote == null || !activeTask) {
+      return;
+    }
+
+    try {
+      await fetch(`${apiBase}/api/vote`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           sessionId,
           memberId: socket.id,
           nickname,
           vote,
-        });
+        }),
+      });
 
-        setMyVote(vote);
-      } catch (error) {
-        console.error("Error submitting vote: ", error);
-      }
+      socket.emit("vote", {
+        sessionId,
+        memberId: socket.id,
+        nickname,
+        vote,
+      });
+    } catch (error) {
+      console.error("Error submitting vote: ", error);
     }
   };
 
@@ -122,6 +122,23 @@ export default function Vote() {
     }
   };
 
+  const nextTask = () => {
+    if (socket) {
+      setErrorMessage("");
+      const activeIndex = tasks.findIndex((task) => task.id === activeTaskId);
+      const firstPending = tasks.find((task) => task.status !== "voted");
+      const nextPending = tasks.find(
+        (task, index) => index > activeIndex && task.status !== "voted"
+      );
+      const fallbackNext = activeIndex >= 0 ? tasks[activeIndex + 1] : null;
+      const optimisticNext = nextPending || fallbackNext || firstPending || null;
+      if (optimisticNext) {
+        setActiveTaskId(optimisticNext.id);
+      }
+      socket.emit("nextTask", { sessionId });
+    }
+  };
+
   const addTask = () => {
     if (socket && taskInput.trim()) {
       setErrorMessage("");
@@ -133,6 +150,7 @@ export default function Vote() {
   const selectTask = (taskId) => {
     if (socket) {
       setErrorMessage("");
+      setActiveTaskId(taskId);
       socket.emit("selectTask", { sessionId, taskId });
     }
   };
@@ -145,7 +163,9 @@ export default function Vote() {
         search: linearSearch,
         limit: "20",
       });
-      const response = await fetch(`${apiBase}/api/linear/issues?${query.toString()}`);
+      const response = await fetch(
+        `${apiBase}/api/linear/issues?${query.toString()}`
+      );
       const data = await response.json();
 
       if (!response.ok) {
@@ -153,6 +173,7 @@ export default function Vote() {
         return;
       }
 
+      setImportTasks(data.tasks || []);
       socket.emit("replaceTasks", {
         sessionId,
         tasks: data.tasks || [],
@@ -164,15 +185,37 @@ export default function Vote() {
     }
   };
 
-  const activeTask = tasks.find((task) => task.id === activeTaskId);
-  const isAdmin = Boolean(socket?.id && adminSocketId === socket.id);
-  const totalMembers = Object.keys(members).length;
-  const membersVoted = Object.values(members).filter(
-    (member) => member.status === "Done"
-  ).length;
-
-  // Calculate voting progress percentage
-  const votingProgress = totalMembers > 0 ? (membersVoted / totalMembers) * 100 : 0;
+  const addImportedTaskToVoting = (importedTaskId) => {
+    if (socket) {
+      const importedTask = importTasks.find((task) => task.id === importedTaskId);
+      if (importedTask) {
+        setImportTasks((prev) => prev.filter((task) => task.id !== importedTaskId));
+        setTasks((prev) => {
+          const exists = prev.some(
+            (task) =>
+              importedTask.linearIssueId &&
+              task.linearIssueId === importedTask.linearIssueId
+          );
+          if (exists) {
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              ...importedTask,
+              id: `queue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              status: "pending",
+              averageVote: null,
+              voteCount: 0,
+              votesByMember: {},
+            },
+          ];
+        });
+      }
+      setErrorMessage("");
+      socket.emit("addImportedTask", { sessionId, importedTaskId });
+    }
+  };
 
   if (!nickname) {
     return (
@@ -199,6 +242,11 @@ export default function Vote() {
             <p className="mt-1 text-lg font-semibold text-cyan-100">
               {activeTask ? activeTask.title : "No task selected"}
             </p>
+            {votingFinished && averageVote !== null && (
+              <p className="mt-2 text-sm text-cyan-200">
+                Voted avg: {averageVote.toFixed(2)} ({activeTask?.voteCount || 0} votes)
+              </p>
+            )}
           </div>
 
           <div className="mb-8">
@@ -208,12 +256,12 @@ export default function Vote() {
                 <button
                   key={number}
                   onClick={() => submitVote(number)}
-                  disabled={myVote !== null}
+                  disabled={!activeTask || votingFinished}
                   className={`rounded-2xl py-4 font-semibold transition ${
                     myVote === number
                       ? "scale-105 bg-gradient-to-br from-emerald-400 to-cyan-500 text-white shadow-lg"
                       : "bg-slate-800/85 text-slate-100 hover:bg-slate-700"
-                  } ${myVote !== null && myVote !== number ? "cursor-not-allowed opacity-45" : ""}`}
+                  } ${!activeTask || votingFinished ? "cursor-not-allowed opacity-45" : ""}`}
                 >
                   {number}
                 </button>
@@ -249,15 +297,22 @@ export default function Vote() {
             <div className="flex flex-wrap justify-center gap-3">
               <button
                 onClick={finishVoting}
-                className="rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-6 py-3 font-semibold text-white hover:brightness-110"
+                disabled={votingFinished}
+                className="rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-6 py-3 font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Finish Early
+                {votingFinished ? "Finished" : "Finish Task"}
               </button>
               <button
                 onClick={resetVotes}
                 className="rounded-2xl bg-gradient-to-r from-rose-500 to-orange-500 px-6 py-3 font-semibold text-white hover:brightness-110"
               >
-                Reset Votes
+                Re-vote Task
+              </button>
+              <button
+                onClick={nextTask}
+                className="rounded-2xl bg-gradient-to-r from-indigo-500 to-violet-500 px-6 py-3 font-semibold text-white hover:brightness-110"
+              >
+                Next Task
               </button>
             </div>
           )}
@@ -286,7 +341,7 @@ export default function Vote() {
                   <input
                     value={linearSearch}
                     onChange={(e) => setLinearSearch(e.target.value)}
-                    placeholder="Import from Linear (search query)"
+                    placeholder="Import from Linear (blank = latest CP desc)"
                     className="w-full rounded-xl border border-white/20 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400"
                   />
                   <button
@@ -300,7 +355,10 @@ export default function Vote() {
               </>
             )}
 
-            <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            <p className="mb-2 text-xs uppercase tracking-wider text-slate-300">
+              Voting Queue
+            </p>
+            <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
               {tasks.map((task) => (
                 <li key={task.id}>
                   <button
@@ -311,10 +369,43 @@ export default function Vote() {
                         : "border-white/10 bg-slate-900/50 text-slate-100"
                     } ${isAdmin ? "hover:border-cyan-300/70" : "cursor-default"}`}
                   >
-                    {task.title}
+                    <div className="font-medium">{task.title}</div>
+                    <div className="mt-1 text-xs text-slate-300">
+                      {task.status === "voted" && typeof task.averageVote === "number"
+                        ? `Voted: avg ${task.averageVote.toFixed(2)} (${task.voteCount || 0} votes)`
+                        : "Not voted yet"}
+                    </div>
                   </button>
                 </li>
               ))}
+            </ul>
+
+            <p className="mb-2 mt-5 text-xs uppercase tracking-wider text-slate-300">
+              Imported List (click to add to queue)
+            </p>
+            <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
+              {importTasks.map((task) => (
+                <li key={task.id}>
+                  <button
+                    onClick={() => isAdmin && addImportedTaskToVoting(task.id)}
+                    className={`flex w-full items-center justify-between rounded-xl border border-white/10 bg-slate-900/50 px-3 py-2 text-left text-sm text-slate-100 ${
+                      isAdmin ? "hover:border-cyan-300/70" : "cursor-default"
+                    }`}
+                  >
+                    <span className="mr-3">{task.title}</span>
+                    {isAdmin && (
+                      <span className="rounded-md bg-cyan-500/80 px-2 py-1 text-xs font-semibold text-white">
+                        Add
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+              {importTasks.length === 0 && (
+                <li className="rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
+                  Nothing imported yet. Click Import, then click a task to add it to queue.
+                </li>
+              )}
             </ul>
           </div>
 
