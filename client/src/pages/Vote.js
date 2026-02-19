@@ -20,11 +20,7 @@ export default function Vote() {
   const [errorMessage, setErrorMessage] = useState("");
   const socket = useSocket();
 
-  const apiBase =
-    process.env.REACT_APP_API_BASE_URL ||
-    (process.env.NODE_ENV === "production"
-      ? "https://duck-and-vote.onrender.com"
-      : "http://localhost:5000");
+  const apiBase = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
 
   const hasJoinedRef = useRef(false);
 
